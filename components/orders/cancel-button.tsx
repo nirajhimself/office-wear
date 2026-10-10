@@ -1,0 +1,3 @@
+"use client";
+import { useState } from "react";
+export function CancelButton({orderNumber}:{orderNumber:string}){const [busy,setBusy]=useState(false);const [message,setMessage]=useState('');async function cancel(){if(!confirm('Cancel this order?'))return;setBusy(true);const res=await fetch(`/api/orders/${orderNumber}/cancel`,{method:'POST'});const data=await res.json();if(!res.ok)setMessage(data.error||'Could not cancel.');else window.location.reload();setBusy(false);}return <div className="return-control"><button className="text-button" disabled={busy} onClick={cancel}>{busy?'Cancelling…':'Cancel order'}</button>{message&&<small>{message}</small>}</div>}

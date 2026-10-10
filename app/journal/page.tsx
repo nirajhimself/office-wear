@@ -1,0 +1,1 @@
+export default function JournalPage() { return <div className="placeholder-page"><span>OFFICE WEAR JOURNAL</span><h1>Stories for the workday.</h1><p>Editorial publishing arrives in the next phase.</p></div>; }

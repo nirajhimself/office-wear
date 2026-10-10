@@ -1,0 +1,5 @@
+import Link from "next/link";
+import { getCurrentUser } from "@/lib/auth/session";
+import { redirect } from "next/navigation";
+import { logoutAction } from "@/lib/auth/actions";
+export default async function AdminLayout({children}:{children:React.ReactNode}){const user=await getCurrentUser();if(!user)redirect(`/login?next=/admin`);if(user.role!=="ADMIN")redirect("/account");return <div className="admin-shell"><aside className="admin-sidebar"><Link href="/admin" className="admin-logo">OFFICE WEAR <span>OPERATIONS</span></Link><nav><Link href="/admin">Overview</Link><Link href="/admin/orders">Orders</Link><Link href="/admin/products">Products</Link><Link href="/admin/inventory">Inventory</Link><Link href="/admin/customers">Customers</Link><Link href="/admin/coupons">Coupons</Link><Link href="/admin/returns">Returns</Link><Link href="/admin/analytics">Analytics</Link></nav><form action={logoutAction}><button>Sign out</button></form></aside><main className="admin-main">{children}</main></div>}

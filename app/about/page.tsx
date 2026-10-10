@@ -1,0 +1,1 @@
+export default function AboutPage() { return <div className="placeholder-page"><span>ABOUT OFFICE WEAR</span><h1>Work doesn't have to look ordinary.</h1><p>Brand story and philosophy will be expanded after the visual foundation is approved.</p></div>; }
