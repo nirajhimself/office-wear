@@ -29,6 +29,7 @@ export async function POST(request: Request) {
     const signature = request.headers.get("x-razorpay-signature");
     const eventId = request.headers.get("x-razorpay-event-id");
 
+    // Verify that the webhook came from Razorpay.
     if (!signature || !verifyWebhookSignature(rawBody, signature)) {
       return NextResponse.json(
         { error: "Invalid webhook signature." },
@@ -55,12 +56,13 @@ export async function POST(request: Request) {
     }
 
     const eventType = event.event ?? "unknown";
-    const payment = event.payload?.payment?.entity;
 
-    // Ignore event types this endpoint does not process.
+    // This endpoint handles only captured and failed payment events.
     if (eventType !== "payment.captured" && eventType !== "payment.failed") {
       return NextResponse.json({ received: true });
     }
+
+    const payment = event.payload?.payment?.entity;
 
     if (!payment?.id || !payment.order_id) {
       return NextResponse.json(
@@ -75,13 +77,14 @@ export async function POST(request: Request) {
     });
 
     if (!record) {
-      // Let Razorpay retry if the matching order is not yet available.
+      // Return an error so Razorpay can retry delivery.
       return NextResponse.json(
         { error: "Matching order not found." },
         { status: 500 },
       );
     }
 
+    // Validate amount and currency for captured payments.
     if (eventType === "payment.captured") {
       const expectedAmount = Math.round(Number(record.order.total) * 100);
 
@@ -98,64 +101,108 @@ export async function POST(request: Request) {
       }
     }
 
-    await prisma.$transaction(async (tx) => {
-      // The unique eventId makes duplicate deliveries detectable.
-      await tx.razorpayWebhookEvent.create({
-        data: {
-          eventId,
-          eventType,
-        },
-      });
-
-      if (eventType === "payment.failed") {
-        // A failed attempt is not necessarily a final failed order.
-        // Keep the order pending so the customer can retry payment.
-        await tx.payment.updateMany({
-          where: {
-            id: record.id,
-            status: { not: "PAID" },
-          },
+    await prisma.$transaction(
+      async (tx) => {
+        // Unique eventId prevents duplicate webhook processing.
+        await tx.razorpayWebhookEvent.create({
           data: {
-            providerPaymentId: payment.id,
-            status: "FAILED",
-          },
-        });
-      } else {
-        // Atomic conditional update prevents two concurrent events
-        // from both confirming inventory for the same payment record.
-        const updated = await tx.payment.updateMany({
-          where: {
-            id: record.id,
-            status: { not: "PAID" },
-          },
-          data: {
-            providerPaymentId: payment.id,
-            status: "PAID",
+            eventId,
+            eventType,
           },
         });
 
-        if (updated.count === 1) {
-          await tx.order.update({
-            where: { id: record.orderId },
+        const currentPayment = await tx.payment.findUnique({
+          where: { id: record.id },
+        });
+
+        const currentOrder = await tx.order.findUnique({
+          where: { id: record.orderId },
+        });
+
+        if (!currentPayment || !currentOrder) {
+          throw new Error("Payment or order no longer exists.");
+        }
+
+        // Never confirm inventory a second time.
+        if (currentPayment.status === "PAID") {
+          await tx.razorpayWebhookEvent.update({
+            where: { eventId },
+            data: { processedAt: new Date() },
+          });
+          return;
+        }
+
+        if (eventType === "payment.failed") {
+          // A failed attempt can be retried. Do not overwrite a paid
+          // payment or change an order that has already been cancelled.
+          if (currentOrder.status !== "CANCELLED") {
+            await tx.payment.updateMany({
+              where: {
+                id: record.id,
+                status: { not: "PAID" },
+              },
+              data: {
+                providerPaymentId: payment.id,
+                status: "FAILED",
+              },
+            });
+          }
+        } else {
+          // Mark the captured payment as paid exactly once.
+          const updated = await tx.payment.updateMany({
+            where: {
+              id: record.id,
+              status: { not: "PAID" },
+            },
             data: {
-              status: "PAYMENT_CONFIRMED",
-              paymentStatus: "PAID",
+              providerPaymentId: payment.id,
+              status: "PAID",
             },
           });
 
-          await confirmInventory(tx, record.orderId);
-        }
-      }
+          if (updated.count === 1) {
+            if (currentOrder.status === "CANCELLED") {
+              // Do not revive a cancelled order or touch its inventory.
+              // This payment requires refund/reconciliation.
+              await tx.order.update({
+                where: { id: record.orderId },
+                data: { paymentStatus: "PAID" },
+              });
 
-      await tx.razorpayWebhookEvent.update({
-        where: { eventId },
-        data: { processedAt: new Date() },
-      });
-    });
+              console.error(
+                "ACTION REQUIRED: Payment captured for a cancelled order",
+                {
+                  orderNumber: currentOrder.orderNumber,
+                  paymentId: payment.id,
+                },
+              );
+            } else {
+              await tx.order.update({
+                where: { id: record.orderId },
+                data: {
+                  status: "PAYMENT_CONFIRMED",
+                  paymentStatus: "PAID",
+                },
+              });
+
+              await confirmInventory(tx, record.orderId);
+            }
+          }
+        }
+
+        await tx.razorpayWebhookEvent.update({
+          where: { eventId },
+          data: { processedAt: new Date() },
+        });
+      },
+      {
+        isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+      },
+    );
 
     return NextResponse.json({ received: true });
   } catch (error) {
-    // A previously recorded event is an expected duplicate.
+    // Duplicate event IDs are expected when Razorpay retries delivery.
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
