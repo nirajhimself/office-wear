@@ -63,6 +63,65 @@ export function Homepage({
 }) {
   return (
     <div className="home">
+      {/* Premium editorial hero */}
+      <section
+        className="home-hero"
+        aria-labelledby="home-hero-title"
+      >
+        <div className="home-hero-image">
+          <img
+            src="https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=2200&q=85"
+            alt="Modern fashion collection styled for everyday wear"
+            fetchPriority="high"
+          />
+
+          <div className="home-hero-shade" />
+
+          <span className="home-hero-index">
+            OFFICE WEAR / COLLECTION 001
+          </span>
+        </div>
+
+        <div className="home-hero-copy">
+          <span className="home-hero-kicker">
+            EVERYDAY ESSENTIALS · DESIGNED IN INDIA
+          </span>
+
+          <h1 id="home-hero-title">
+            MADE FOR
+            <br />
+            THE HOURS
+            <br />
+            <em>THAT MATTER.</em>
+          </h1>
+
+          <p>
+            Thoughtful everyday clothing for work, weekends
+            and everything in between.
+          </p>
+
+          <div className="home-hero-actions">
+            <Link
+              href="/shop"
+              className="home-hero-button"
+            >
+              SHOP THE COLLECTION <ArrowRight size={16} />
+            </Link>
+
+            <Link
+              href="/shop?category=jackets"
+              className="home-hero-secondary"
+            >
+              EXPLORE WINTER
+            </Link>
+          </div>
+
+          <span className="home-hero-footnote">
+            GOOD CLOTHES. LONG DAYS. YOUR OWN WAY.
+          </span>
+        </div>
+      </section>
+
       {/* Winter collection campaign */}
       <section
         className="winter-campaign"
@@ -93,7 +152,9 @@ export function Homepage({
         </div>
 
         <div className="intro-main">
-          <p className="display-overline">A wardrobe, edited.</p>
+          <p className="display-overline">
+            A wardrobe, edited.
+          </p>
 
           <h2 id="intro-title">
             Designed to work
@@ -103,9 +164,9 @@ export function Homepage({
 
           <div className="intro-lower">
             <p>
-              A considered collection of everyday work essentials — cut
-              clean, made to move and built for the hours between the
-              first meeting and the last train home.
+              A considered collection of everyday work essentials —
+              cut clean, made to move and built for the hours between
+              the first meeting and the last train home.
             </p>
 
             <Link href="/shop" className="text-link">
@@ -125,7 +186,10 @@ export function Homepage({
             <span className="eyebrow-dark">
               02 / The collection
             </span>
-            <h2 id="collection-title">The First Edit</h2>
+
+            <h2 id="collection-title">
+              The First Edit
+            </h2>
           </div>
 
           <div className="section-heading-side">
@@ -176,6 +240,7 @@ export function Homepage({
               <div className="product-meta">
                 <div>
                   <h3>{product.name}</h3>
+
                   <p>
                     {product.color} · {product.category}
                   </p>
@@ -250,7 +315,9 @@ export function Homepage({
             </h2>
           </div>
 
-          <p>Start with the pieces you reach for most.</p>
+          <p>
+            Start with the pieces you reach for most.
+          </p>
         </div>
 
         <div className="category-grid">
@@ -288,7 +355,9 @@ export function Homepage({
             05 / Our point of view
           </span>
 
-          <h2 id="principles-title">Less, but better.</h2>
+          <h2 id="principles-title">
+            Less, but better.
+          </h2>
         </div>
 
         <div className="principles-grid">
@@ -303,11 +372,18 @@ export function Homepage({
       </section>
 
       {/* Brand manifesto */}
-      <section className="manifesto" aria-label="Brand manifesto">
+      <section
+        className="manifesto"
+        aria-label="Brand manifesto"
+      >
         <div className="manifesto-inner">
-          <span className="eyebrow">06 / OFFICE WEAR</span>
+          <span className="eyebrow">
+            06 / OFFICE WEAR
+          </span>
 
-          <p>“Work doesn't have to look ordinary.”</p>
+          <p>
+            “Work doesn't have to look ordinary.”
+          </p>
 
           <span className="manifesto-caption">
             Modern clothing for the hours that matter.
@@ -329,7 +405,9 @@ export function Homepage({
             07 / Stay in the loop
           </span>
 
-          <h2 id="newsletter-title">The Office Letter.</h2>
+          <h2 id="newsletter-title">
+            The Office Letter.
+          </h2>
         </div>
 
         <div className="newsletter-band-right">
