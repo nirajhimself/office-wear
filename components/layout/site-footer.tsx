@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
-import { subscribeNewsletter } from "@/lib/marketing/actions";
+import { NewsletterForm } from "@/components/layout/newsletter-form";
 
 const footerLinks = {
   Shop: [
@@ -29,6 +29,7 @@ export function SiteFooter() {
   return (
     <footer className="site-footer">
       <div className="footer-top">
+        {/* Brand */}
         <div className="footer-brand">
           <Link href="/" aria-label="OFFICE WEAR home">
             <Image
@@ -50,6 +51,7 @@ export function SiteFooter() {
           </Link>
         </div>
 
+        {/* Navigation */}
         <div className="footer-columns">
           {Object.entries(footerLinks).map(([title, items]) => (
             <div key={title}>
@@ -64,6 +66,7 @@ export function SiteFooter() {
           ))}
         </div>
 
+        {/* Newsletter */}
         <div className="newsletter">
           <span className="footer-label">The Office Letter</span>
 
@@ -74,20 +77,7 @@ export function SiteFooter() {
             when there is something worth sharing.
           </p>
 
-          <form action={subscribeNewsletter} className="newsletter-form">
-            <input
-              type="email"
-              name="email"
-              placeholder="Your email address"
-              aria-label="Your email address"
-              autoComplete="email"
-              required
-            />
-
-            <button type="submit">
-              Subscribe <ArrowUpRight size={14} />
-            </button>
-          </form>
+          <NewsletterForm />
 
           <small className="footer-newsletter-note">
             By subscribing, you agree to receive occasional emails from OFFICE
@@ -96,6 +86,7 @@ export function SiteFooter() {
         </div>
       </div>
 
+      {/* Copyright */}
       <div className="footer-bottom">
         <span>© {new Date().getFullYear()} OFFICE WEAR</span>
         <span>Clothing for the modern workday.</span>
