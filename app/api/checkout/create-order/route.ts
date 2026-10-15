@@ -7,46 +7,292 @@ import { quoteCart, reserveInventory, confirmInventory } from "@/lib/commerce";
 import { createRazorpayOrder } from "@/lib/payments/razorpay";
 
 const schema = z.object({
-  items: z.array(z.object({ productId: z.string(), size: z.string(), color: z.string(), quantity: z.number().int().min(1).max(10) })).min(1),
+  items: z
+    .array(
+      z.object({
+        productId: z.string(),
+        size: z.string(),
+        color: z.string(),
+        quantity: z.number().int().min(1).max(10),
+      }),
+    )
+    .min(1),
   paymentMethod: z.enum(["RAZORPAY", "COD"]),
   couponCode: z.string().trim().max(32).optional(),
-  customer: z.object({ name: z.string().trim().min(2).max(100), email: z.string().email().optional(), phone: z.string().trim().min(10).max(15), line1: z.string().trim().min(3).max(150), line2: z.string().trim().max(150).optional(), city: z.string().trim().min(2).max(80), state: z.string().trim().min(2).max(80), postalCode: z.string().trim().regex(/^\d{6}$/, "Enter a valid 6-digit PIN code."), country: z.string().default("India") })
+  savedAddressId: z.string().min(1).optional(),
+  customer: z.object({
+    name: z.string().trim().min(2).max(100),
+    email: z.string().email().optional(),
+    phone: z.string().trim().min(10).max(15),
+    line1: z.string().trim().min(3).max(150),
+    line2: z.string().trim().max(150).optional(),
+    city: z.string().trim().min(2).max(80),
+    state: z.string().trim().min(2).max(80),
+    postalCode: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, "Enter a valid 6-digit PIN code."),
+    country: z.string().default("India"),
+  }),
 });
 
-function orderNumber() { const now = new Date(); return `OW${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}-${crypto.randomUUID().slice(0,8).toUpperCase()}`; }
+function orderNumber() {
+  const now = new Date();
+  return `OW${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+}
 
 export async function POST(request: Request) {
   try {
     const parsed = schema.safeParse(await request.json());
-    if (!parsed.success) return NextResponse.json({ error: parsed.error.issues[0]?.message ?? "Invalid checkout details." }, { status: 400 });
+
+    if (!parsed.success) {
+      return NextResponse.json(
+        {
+          error: parsed.error.issues[0]?.message ?? "Invalid checkout details.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const data = parsed.data;
     const user = await getCurrentUser();
-    if (!user && !parsed.data.customer.email) return NextResponse.json({ error: "Email is required for guest checkout." }, { status: 400 });
-    const quote = await quoteCart(parsed.data.items, parsed.data.couponCode);
+
+    if (!user && !data.customer.email) {
+      return NextResponse.json(
+        { error: "Email is required for guest checkout." },
+        { status: 400 },
+      );
+    }
+
+    // A saved address can only be used by its authenticated owner.
+    let savedAddress = null;
+
+    if (data.savedAddressId) {
+      if (!user) {
+        return NextResponse.json(
+          { error: "Sign in to use a saved address." },
+          { status: 401 },
+        );
+      }
+
+      savedAddress = await prisma.address.findFirst({
+        where: {
+          id: data.savedAddressId,
+          userId: user.id,
+        },
+      });
+
+      if (!savedAddress) {
+        return NextResponse.json(
+          { error: "Saved address not found. Please select another address." },
+          { status: 400 },
+        );
+      }
+    }
+
+    const deliveryAddress = savedAddress
+      ? {
+          name: savedAddress.name,
+          phone: savedAddress.phone,
+          line1: savedAddress.line1,
+          line2: savedAddress.line2 ?? "",
+          city: savedAddress.city,
+          state: savedAddress.state,
+          postalCode: savedAddress.postalCode,
+          country: savedAddress.country,
+        }
+      : {
+          name: data.customer.name,
+          phone: data.customer.phone,
+          line1: data.customer.line1,
+          line2: data.customer.line2 ?? "",
+          city: data.customer.city,
+          state: data.customer.state,
+          postalCode: data.customer.postalCode,
+          country: data.customer.country,
+        };
+
+    const quote = await quoteCart(data.items, data.couponCode);
     const number = orderNumber();
-    const guestAccessToken = user ? null : crypto.randomUUID().replaceAll("-", "");
+    const guestAccessToken = user
+      ? null
+      : crypto.randomUUID().replaceAll("-", "");
+
     const created = await prisma.$transaction(async (tx) => {
       await reserveInventory(tx, quote.lines, number);
-      const address = user ? await tx.address.create({ data: { userId: user.id, name: parsed.data.customer.name, phone: parsed.data.customer.phone, line1: parsed.data.customer.line1, line2: parsed.data.customer.line2 || null, city: parsed.data.customer.city, state: parsed.data.customer.state, postalCode: parsed.data.customer.postalCode, country: parsed.data.customer.country } }) : null;
-      const order = await tx.order.create({ data: { orderNumber: number, userId: user?.id, addressId: address?.id, guestEmail: user ? null : parsed.data.customer.email, guestAccessToken, customerName: parsed.data.customer.name, customerPhone: parsed.data.customer.phone, deliveryAddress: parsed.data.customer, subtotal: quote.subtotal, shipping: quote.shipping, discount: quote.discount, total: quote.total, couponCode: quote.coupon?.code, paymentMethod: parsed.data.paymentMethod, items: { create: quote.lines.map((line) => ({ variantId: line.variant.id, productName: line.variant.product.name, sku: line.variant.sku, size: line.variant.size, color: line.variant.color, image: line.variant.product.images[0]?.url, unitPrice: line.variant.price, quantity: line.quantity })) }, payment: { create: { amount: quote.total, status: "PENDING" } }, ...(quote.coupon ? { } : {}) } });
-      if (quote.coupon) await tx.coupon.update({ where: { id: quote.coupon.id }, data: { usedCount: { increment: 1 }, usages: { create: { userId: user?.id, orderId: order.id } } } });
+
+      // Reuse the selected saved address. For a new address, create one
+      // for the signed-in customer. Guest addresses remain on the order.
+      const address = savedAddress
+        ? savedAddress
+        : user
+          ? await tx.address.create({
+              data: {
+                ...deliveryAddress,
+                userId: user.id,
+                label: "Checkout",
+                isDefault: false,
+              },
+            })
+          : null;
+
+      const order = await tx.order.create({
+        data: {
+          orderNumber: number,
+          userId: user?.id,
+          addressId: address?.id,
+          guestEmail: user ? null : data.customer.email,
+          guestAccessToken,
+          customerName: deliveryAddress.name,
+          customerPhone: deliveryAddress.phone,
+          deliveryAddress,
+          subtotal: quote.subtotal,
+          shipping: quote.shipping,
+          discount: quote.discount,
+          total: quote.total,
+          couponCode: quote.coupon?.code,
+          paymentMethod: data.paymentMethod,
+          items: {
+            create: quote.lines.map((line) => ({
+              variantId: line.variant.id,
+              productName: line.variant.product.name,
+              sku: line.variant.sku,
+              size: line.variant.size,
+              color: line.variant.color,
+              image: line.variant.product.images[0]?.url,
+              unitPrice: line.variant.price,
+              quantity: line.quantity,
+            })),
+          },
+          payment: {
+            create: {
+              amount: quote.total,
+              status: "PENDING",
+            },
+          },
+        },
+      });
+
+      if (quote.coupon) {
+        await tx.coupon.update({
+          where: { id: quote.coupon.id },
+          data: {
+            usedCount: { increment: 1 },
+            usages: {
+              create: {
+                userId: user?.id,
+                orderId: order.id,
+              },
+            },
+          },
+        });
+      }
+
       return order;
     });
 
-    if (parsed.data.paymentMethod === "COD") {
-      await prisma.$transaction(async (tx) => { await tx.payment.update({ where: { orderId: created.id }, data: { status: "AUTHORIZED", provider: "cod" } }); await tx.order.update({ where: { id: created.id }, data: { status: "PAYMENT_CONFIRMED", paymentStatus: "AUTHORIZED" } }); await confirmInventory(tx, created.id); });
-      return NextResponse.json({ success: true, orderNumber: created.orderNumber, guestAccessToken: guestAccessToken || undefined, paymentMethod: "COD" });
+    if (data.paymentMethod === "COD") {
+      await prisma.$transaction(async (tx) => {
+        await tx.payment.update({
+          where: { orderId: created.id },
+          data: { status: "AUTHORIZED", provider: "cod" },
+        });
+
+        await tx.order.update({
+          where: { id: created.id },
+          data: {
+            status: "PAYMENT_CONFIRMED",
+            paymentStatus: "AUTHORIZED",
+          },
+        });
+
+        await confirmInventory(tx, created.id);
+      });
+
+      return NextResponse.json({
+        success: true,
+        orderNumber: created.orderNumber,
+        guestAccessToken: guestAccessToken || undefined,
+        paymentMethod: "COD",
+      });
     }
 
     try {
-      const rp = await createRazorpayOrder({ amount: quote.total, receipt: created.orderNumber, notes: { orderNumber: created.orderNumber } });
-      await prisma.payment.update({ where: { orderId: created.id }, data: { providerOrderId: rp.id } });
-      return NextResponse.json({ success: true, orderNumber: created.orderNumber, guestAccessToken: guestAccessToken || undefined, razorpayOrderId: rp.id, amount: rp.amount, keyId: process.env.RAZORPAY_KEY_ID });
+      const rp = await createRazorpayOrder({
+        amount: quote.total,
+        receipt: created.orderNumber,
+        notes: { orderNumber: created.orderNumber },
+      });
+
+      await prisma.payment.update({
+        where: { orderId: created.id },
+        data: { providerOrderId: rp.id },
+      });
+
+      return NextResponse.json({
+        success: true,
+        orderNumber: created.orderNumber,
+        guestAccessToken: guestAccessToken || undefined,
+        razorpayOrderId: rp.id,
+        amount: rp.amount,
+        keyId: process.env.RAZORPAY_KEY_ID,
+      });
     } catch (error) {
-      await prisma.$transaction(async (tx) => { const order = await tx.order.findUnique({ where: { id: created.id }, select: { status: true } }); if (order?.status === "PENDING") { await tx.payment.update({ where: { orderId: created.id }, data: { status: "FAILED" } }); await tx.order.update({ where: { id: created.id }, data: { status: "CANCELLED", paymentStatus: "FAILED" } }); await (await import("@/lib/commerce")).releaseInventory(tx, created.id); if (created.couponCode) { const coupon = await tx.coupon.findUnique({ where: { code: created.couponCode } }); if (coupon) { await tx.couponUsage.deleteMany({ where: { orderId: created.id } }); await tx.coupon.update({ where: { id: coupon.id }, data: { usedCount: { decrement: 1 } } }); } } } });
+      await prisma.$transaction(async (tx) => {
+        const order = await tx.order.findUnique({
+          where: { id: created.id },
+          select: { status: true },
+        });
+
+        if (order?.status === "PENDING") {
+          await tx.payment.update({
+            where: { orderId: created.id },
+            data: { status: "FAILED" },
+          });
+
+          await tx.order.update({
+            where: { id: created.id },
+            data: {
+              status: "CANCELLED",
+              paymentStatus: "FAILED",
+            },
+          });
+
+          const { releaseInventory } = await import("@/lib/commerce");
+          await releaseInventory(tx, created.id);
+
+          if (created.couponCode) {
+            const coupon = await tx.coupon.findUnique({
+              where: { code: created.couponCode },
+            });
+
+            if (coupon) {
+              await tx.couponUsage.deleteMany({
+                where: { orderId: created.id },
+              });
+
+              await tx.coupon.update({
+                where: { id: coupon.id },
+                data: { usedCount: { decrement: 1 } },
+              });
+            }
+          }
+        }
+      });
+
       throw error;
     }
   } catch (error) {
     console.error("checkout/create-order", error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "Checkout failed. Please try again." }, { status: 500 });
+
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Checkout failed. Please try again.",
+      },
+      { status: 500 },
+    );
   }
 }

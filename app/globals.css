@@ -4694,7 +4694,6 @@ button {
   }
 }
 
-
 /* OFFICE WEAR — premium editorial homepage hero */
 .home-hero {
   display: grid;
@@ -4730,11 +4729,7 @@ button {
 .home-hero-shade {
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    0deg,
-    rgba(0, 0, 0, 0.4),
-    transparent 38%
-  );
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.4), transparent 38%);
   pointer-events: none;
 }
 
@@ -4883,3 +4878,53 @@ button {
   }
 }
 
+.saved-addresses {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+
+.saved-addresses > p {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.saved-addresses > label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border, #dedbd4);
+  cursor: pointer;
+}
+
+.saved-addresses > label.selected {
+  border-color: #171717;
+  background: #f8f7f3;
+}
+
+.saved-addresses > label input {
+  margin-top: 4px;
+  accent-color: #171717;
+}
+
+.saved-addresses > label span {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.saved-addresses > label small {
+  color: #696969;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.saved-addresses > .text-button {
+  justify-self: start;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
