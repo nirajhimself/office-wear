@@ -20,7 +20,13 @@ export function CartDrawer({
   const { items, subtotal, updateQuantity, removeItem } = useCart();
 
   const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
-  const shipping = subtotal === 0 || subtotal >= 1999 ? 0 : 99;
+  const FREE_SHIPPING_THRESHOLD = 999;
+  const STANDARD_SHIPPING = 99;
+
+  const shipping =
+    subtotal === 0 || subtotal >= FREE_SHIPPING_THRESHOLD
+      ? 0
+      : STANDARD_SHIPPING;
   const total = subtotal + shipping;
 
   return (

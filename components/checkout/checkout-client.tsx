@@ -117,7 +117,12 @@ export function CheckoutClient({
   const activeAddress =
     !useNewAddress && selectedAddress ? selectedAddress : null;
 
-  const estimatedShipping = subtotal >= 1999 ? 0 : 99;
+  const FREE_SHIPPING_THRESHOLD = 999;
+  const STANDARD_SHIPPING = 99;
+
+  const estimatedShipping =
+    subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : STANDARD_SHIPPING;
+
   const estimatedTotal = subtotal + estimatedShipping;
 
   const update = (key: keyof CheckoutForm, value: string) => {

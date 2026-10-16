@@ -491,7 +491,7 @@ model BrandSettings {
   supportEmail      String?
   supportPhone      String?
   instagramUrl      String?
-  shippingFreeAbove Int      @default(1999)
+  shippingFreeAbove Int      @default(999)
   standardShipping  Int      @default(99)
   returnWindowDays  Int      @default(7)
   updatedAt         DateTime @updatedAt
