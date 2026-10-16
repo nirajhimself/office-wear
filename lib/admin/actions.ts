@@ -7,38 +7,413 @@ import { requireAdmin } from "@/lib/auth/session";
 import { revalidatePath } from "next/cache";
 import { restockReturnItems } from "@/lib/commerce";
 
-export async function updateOrderStatus(formData: FormData) { await requireAdmin(); const id=String(formData.get("id")); const status=z.enum(["PENDING","PAYMENT_CONFIRMED","PROCESSING","SHIPPED","DELIVERED","CANCELLED","RETURN_REQUESTED","RETURNED","REFUNDED"]).parse(formData.get("status")); const existing=await prisma.order.findUnique({where:{id},select:{status:true,paymentStatus:true}}); if(!existing)throw new Error("Order not found."); if(status==="CANCELLED"&&existing.paymentStatus==="PAID")throw new Error("Use the refund/cancellation workflow for paid orders."); await prisma.$transaction(async tx=>{await tx.order.update({where:{id},data:{status}}); if(status==="CANCELLED"&&existing.status!=="CANCELLED"){const {releaseInventory,restockInventory}=await import("@/lib/commerce"); if(existing.status==="PENDING")await releaseInventory(tx,id); else if(["PAYMENT_CONFIRMED","PROCESSING"].includes(existing.status))await restockInventory(tx,id);}}); revalidatePath("/admin/orders"); revalidatePath("/account"); }
-export async function adjustInventory(formData: FormData) { await requireAdmin(); const variantId=String(formData.get('variantId')); const quantity=Number(formData.get('quantity')); if(!Number.isInteger(quantity)||quantity===0)throw new Error('Quantity must be a non-zero integer.'); await prisma.$transaction(async tx=>{const inv=await tx.inventory.findUnique({where:{variantId}});if(!inv)throw new Error('Inventory record not found.');const next=inv.stock+quantity;if(next<0)throw new Error('Stock cannot be negative.');await tx.inventory.update({where:{id:inv.id},data:{stock:next,transactions:{create:{type:quantity>0?'RECEIPT':'ADJUSTMENT',quantity:Math.abs(quantity),note:String(formData.get('note')||'Admin adjustment')}}}})});revalidatePath('/admin/inventory');revalidatePath('/shop');}
-export async function createCoupon(formData: FormData){await requireAdmin();const code=String(formData.get('code')).trim().toUpperCase();const type=z.enum(['PERCENT','FIXED']).parse(formData.get('type'));const value=Number(formData.get('value'));const minOrderValue=Number(formData.get('minOrderValue')||0);if(!code||!Number.isInteger(value)||value<=0)throw new Error('Invalid coupon.');await prisma.coupon.create({data:{code,type,value,minOrderValue,active:true}});revalidatePath('/admin/coupons');}
-export async function createProduct(formData: FormData){await requireAdmin();const data={name:String(formData.get('name')).trim(),slug:String(formData.get('slug')).trim().toLowerCase(),description:String(formData.get('description')).trim(),gender:String(formData.get('gender')),category:String(formData.get('category')),price:Number(formData.get('price')),color:String(formData.get('color')).trim(),size:String(formData.get('size')).trim(),image:String(formData.get('image')).trim(),sku:String(formData.get('sku')).trim()};if(!data.name||!data.slug||!data.image||!data.sku||!Number.isInteger(data.price))throw new Error('Complete all product fields.');const category=await prisma.category.findUnique({where:{slug:data.category.toLowerCase()}});if(!category)throw new Error('Category not found.');const collection=await prisma.collection.findUnique({where:{slug:'the-first-edit'}});const productId=`ow-${crypto.randomUUID().slice(0,8)}`;await prisma.product.create({data:{id:productId,name:data.name,slug:data.slug,description:data.description,gender:data.gender,categoryId:category.id,collectionId:collection?.id,status:'ACTIVE',variants:{create:{id:`${productId}-${data.size}-${data.color}`,sku:data.sku,size:data.size,color:data.color,price:data.price,inventory:{create:{stock:0}}}},images:{create:{url:data.image,alt:data.name,sortOrder:0}}}});revalidatePath('/admin/products');revalidatePath('/shop');}
+export async function updateOrderStatus(formData: FormData) {
+  await requireAdmin();
+
+  const id = String(formData.get("id") ?? "").trim();
+
+  const status = z
+    .enum([
+      "PENDING",
+      "PAYMENT_CONFIRMED",
+      "PROCESSING",
+      "SHIPPED",
+      "DELIVERED",
+      "CANCELLED",
+      "RETURN_REQUESTED",
+      "RETURNED",
+      "REFUNDED",
+    ])
+    .parse(formData.get("status"));
+
+  if (!id) {
+    throw new Error("Order ID is required.");
+  }
+
+  const existing = await prisma.order.findUnique({
+    where: { id },
+    include: {
+      payment: true,
+      shipment: true,
+    },
+  });
+
+  if (!existing) {
+    throw new Error("Order not found.");
+  }
+
+  if (existing.status === status) {
+    revalidatePath("/admin/orders");
+    return;
+  }
+
+  if (["CANCELLED", "RETURNED", "REFUNDED"].includes(existing.status)) {
+    throw new Error(
+      "This order is already closed. Use the appropriate return or refund workflow.",
+    );
+  }
+
+  if (["RETURN_REQUESTED", "RETURNED", "REFUNDED"].includes(status)) {
+    throw new Error("Process returns and refunds through the Returns section.");
+  }
+
+  if (existing.status === "DELIVERED") {
+    throw new Error("Delivered orders cannot be changed through this action.");
+  }
+
+  if (status === "CANCELLED") {
+    if (existing.paymentStatus === "PAID") {
+      throw new Error(
+        "This order has been paid. Use the cancellation and refund workflow.",
+      );
+    }
+
+    if (existing.shipment) {
+      throw new Error(
+        "A shipment already exists. Resolve the shipment before cancelling this order.",
+      );
+    }
+
+    if (
+      !["PENDING", "PAYMENT_CONFIRMED", "PROCESSING"].includes(existing.status)
+    ) {
+      throw new Error(
+        "This order cannot be cancelled from its current status.",
+      );
+    }
+  }
+
+  const allowedTransitions: Record<string, string[]> = {
+    PENDING: ["PAYMENT_CONFIRMED", "PROCESSING", "CANCELLED"],
+    PAYMENT_CONFIRMED: ["PROCESSING", "CANCELLED"],
+    PROCESSING: ["SHIPPED", "CANCELLED"],
+    SHIPPED: ["DELIVERED"],
+  };
+
+  if (!allowedTransitions[existing.status]?.includes(status)) {
+    throw new Error(
+      `Cannot change an order from ${existing.status.replaceAll("_", " ")} to ${status.replaceAll("_", " ")}.`,
+    );
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (status === "CANCELLED") {
+      const { releaseInventory, restockInventory } =
+        await import("@/lib/commerce");
+
+      if (existing.status === "PENDING") {
+        await releaseInventory(tx, id);
+      } else {
+        await restockInventory(tx, id, "ADJUSTMENT");
+      }
+    }
+
+    await tx.order.update({
+      where: { id },
+      data: { status },
+    });
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/inventory");
+  revalidatePath("/admin/analytics");
+  revalidatePath("/account");
+  revalidatePath(`/order/${existing.orderNumber}`);
+}
+
+export async function adjustInventory(formData: FormData) {
+  await requireAdmin();
+  const variantId = String(formData.get("variantId"));
+  const quantity = Number(formData.get("quantity"));
+  if (!Number.isInteger(quantity) || quantity === 0)
+    throw new Error("Quantity must be a non-zero integer.");
+  await prisma.$transaction(async (tx) => {
+    const inv = await tx.inventory.findUnique({ where: { variantId } });
+    if (!inv) throw new Error("Inventory record not found.");
+    const next = inv.stock + quantity;
+    if (next < 0) throw new Error("Stock cannot be negative.");
+    await tx.inventory.update({
+      where: { id: inv.id },
+      data: {
+        stock: next,
+        transactions: {
+          create: {
+            type: quantity > 0 ? "RECEIPT" : "ADJUSTMENT",
+            quantity: Math.abs(quantity),
+            note: String(formData.get("note") || "Admin adjustment"),
+          },
+        },
+      },
+    });
+  });
+  revalidatePath("/admin/inventory");
+  revalidatePath("/shop");
+}
+export async function createCoupon(formData: FormData) {
+  await requireAdmin();
+  const code = String(formData.get("code")).trim().toUpperCase();
+  const type = z.enum(["PERCENT", "FIXED"]).parse(formData.get("type"));
+  const value = Number(formData.get("value"));
+  const minOrderValue = Number(formData.get("minOrderValue") || 0);
+  if (!code || !Number.isInteger(value) || value <= 0)
+    throw new Error("Invalid coupon.");
+  await prisma.coupon.create({
+    data: { code, type, value, minOrderValue, active: true },
+  });
+  revalidatePath("/admin/coupons");
+}
+export async function createProduct(formData: FormData) {
+  await requireAdmin();
+  const data = {
+    name: String(formData.get("name")).trim(),
+    slug: String(formData.get("slug")).trim().toLowerCase(),
+    description: String(formData.get("description")).trim(),
+    gender: String(formData.get("gender")),
+    category: String(formData.get("category")),
+    price: Number(formData.get("price")),
+    color: String(formData.get("color")).trim(),
+    size: String(formData.get("size")).trim(),
+    image: String(formData.get("image")).trim(),
+    sku: String(formData.get("sku")).trim(),
+  };
+  if (
+    !data.name ||
+    !data.slug ||
+    !data.image ||
+    !data.sku ||
+    !Number.isInteger(data.price)
+  )
+    throw new Error("Complete all product fields.");
+  const category = await prisma.category.findUnique({
+    where: { slug: data.category.toLowerCase() },
+  });
+  if (!category) throw new Error("Category not found.");
+  const collection = await prisma.collection.findUnique({
+    where: { slug: "the-first-edit" },
+  });
+  const productId = `ow-${crypto.randomUUID().slice(0, 8)}`;
+  await prisma.product.create({
+    data: {
+      id: productId,
+      name: data.name,
+      slug: data.slug,
+      description: data.description,
+      gender: data.gender,
+      categoryId: category.id,
+      collectionId: collection?.id,
+      status: "ACTIVE",
+      variants: {
+        create: {
+          id: `${productId}-${data.size}-${data.color}`,
+          sku: data.sku,
+          size: data.size,
+          color: data.color,
+          price: data.price,
+          inventory: { create: { stock: 0 } },
+        },
+      },
+      images: { create: { url: data.image, alt: data.name, sortOrder: 0 } },
+    },
+  });
+  revalidatePath("/admin/products");
+  revalidatePath("/shop");
+}
 
 export async function processReturn(formData: FormData) {
   await requireAdmin();
   const returnId = String(formData.get("returnId"));
   const action = String(formData.get("action"));
-  const ret = await prisma.returnRequest.findUnique({ where: { id: returnId }, include: { order: { include: { payment: true } }, items: true } });
+  const ret = await prisma.returnRequest.findUnique({
+    where: { id: returnId },
+    include: { order: { include: { payment: true } }, items: true },
+  });
   if (!ret) throw new Error("Return request not found.");
-  if (action === "REJECT") { await prisma.returnRequest.update({ where: { id: returnId }, data: { status: "REJECTED" } }); revalidatePath('/admin/returns'); return; }
-  if (action !== "APPROVE") throw new Error("Invalid return action.");
-  if (ret.status !== "REQUESTED") throw new Error("This return has already been processed.");
-  if (ret.order.paymentStatus === "PAID" && ret.order.payment?.providerPaymentId) {
-    const { refundRazorpayPayment } = await import("@/lib/payments/razorpay");
-    const response = await refundRazorpayPayment(ret.order.payment.providerPaymentId, ret.refundAmount);
-    await prisma.$transaction(async tx => { await tx.refund.create({ data: { returnId, paymentId: ret.order.payment?.id, providerRefundId: response?.id, amount: ret.refundAmount, status: "REFUNDED", rawResponse: response } }); await tx.returnRequest.update({ where: { id: returnId }, data: { status: "REFUNDED" } }); await restockReturnItems(tx, returnId); await tx.order.update({ where: { id: ret.order.id }, data: { status: "REFUNDED", paymentStatus: "REFUNDED" } }); });
-  } else {
-    await prisma.$transaction(async tx => { await tx.refund.create({ data: { returnId, paymentId: ret.order.payment?.id, amount: ret.refundAmount, status: "AUTHORIZED" } }); await tx.returnRequest.update({ where: { id: returnId }, data: { status: "REFUNDED" } }); await restockReturnItems(tx, returnId); await tx.order.update({ where: { id: ret.order.id }, data: { status: "REFUNDED" } }); });
+  if (action === "REJECT") {
+    await prisma.returnRequest.update({
+      where: { id: returnId },
+      data: { status: "REJECTED" },
+    });
+    revalidatePath("/admin/returns");
+    return;
   }
-  revalidatePath('/admin/returns'); revalidatePath('/admin/orders');
+  if (action !== "APPROVE") throw new Error("Invalid return action.");
+  if (ret.status !== "REQUESTED")
+    throw new Error("This return has already been processed.");
+  if (
+    ret.order.paymentStatus === "PAID" &&
+    ret.order.payment?.providerPaymentId
+  ) {
+    const { refundRazorpayPayment } = await import("@/lib/payments/razorpay");
+    const response = await refundRazorpayPayment(
+      ret.order.payment.providerPaymentId,
+      ret.refundAmount,
+    );
+    await prisma.$transaction(async (tx) => {
+      await tx.refund.create({
+        data: {
+          returnId,
+          paymentId: ret.order.payment?.id,
+          providerRefundId: response?.id,
+          amount: ret.refundAmount,
+          status: "REFUNDED",
+          rawResponse: response,
+        },
+      });
+      await tx.returnRequest.update({
+        where: { id: returnId },
+        data: { status: "REFUNDED" },
+      });
+      await restockReturnItems(tx, returnId);
+      await tx.order.update({
+        where: { id: ret.order.id },
+        data: { status: "REFUNDED", paymentStatus: "REFUNDED" },
+      });
+    });
+  } else {
+    await prisma.$transaction(async (tx) => {
+      await tx.refund.create({
+        data: {
+          returnId,
+          paymentId: ret.order.payment?.id,
+          amount: ret.refundAmount,
+          status: "AUTHORIZED",
+        },
+      });
+      await tx.returnRequest.update({
+        where: { id: returnId },
+        data: { status: "REFUNDED" },
+      });
+      await restockReturnItems(tx, returnId);
+      await tx.order.update({
+        where: { id: ret.order.id },
+        data: { status: "REFUNDED" },
+      });
+    });
+  }
+  revalidatePath("/admin/returns");
+  revalidatePath("/admin/orders");
 }
 
 export async function createShipmentForOrder(formData: FormData) {
   await requireAdmin();
   const orderId = String(formData.get("orderId"));
-  const order = await prisma.order.findUnique({ where: { id: orderId }, include: { items: true, shipment: true } });
-  if (!order || !order.deliveryAddress || order.shipment) throw new Error("Order is missing a shipment-ready address or already has a shipment.");
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { items: true, shipment: true },
+  });
+  if (!order || !order.deliveryAddress || order.shipment)
+    throw new Error(
+      "Order is missing a shipment-ready address or already has a shipment.",
+    );
   const { shippingProvider } = await import("@/lib/shipping");
-  const result = await shippingProvider.createShipment({ orderNumber: order.orderNumber, address: order.deliveryAddress as any, items: order.items.map(i => ({ name: i.productName, sku: i.sku, quantity: i.quantity, price: i.unitPrice })), total: order.total, paymentMethod: order.paymentMethod });
-  await prisma.shipment.create({ data: { orderId: order.id, providerOrderId: result.providerOrderId, shipmentId: result.shipmentId, awb: result.awb, courierName: result.courierName, trackingUrl: result.trackingUrl, status: "LABEL_CREATED", rawResponse: result.rawResponse as any } });
-  await prisma.order.update({ where: { id: order.id }, data: { status: "PROCESSING" } });
-  revalidatePath('/admin/orders'); revalidatePath(`/order/${order.orderNumber}`);
+  const result = await shippingProvider.createShipment({
+    orderNumber: order.orderNumber,
+    address: order.deliveryAddress as any,
+    items: order.items.map((i) => ({
+      name: i.productName,
+      sku: i.sku,
+      quantity: i.quantity,
+      price: i.unitPrice,
+    })),
+    total: order.total,
+    paymentMethod: order.paymentMethod,
+  });
+  await prisma.shipment.create({
+    data: {
+      orderId: order.id,
+      providerOrderId: result.providerOrderId,
+      shipmentId: result.shipmentId,
+      awb: result.awb,
+      courierName: result.courierName,
+      trackingUrl: result.trackingUrl,
+      status: "LABEL_CREATED",
+      rawResponse: result.rawResponse as any,
+    },
+  });
+  await prisma.order.update({
+    where: { id: order.id },
+    data: { status: "PROCESSING" },
+  });
+  revalidatePath("/admin/orders");
+  revalidatePath(`/order/${order.orderNumber}`);
+}
+
+export async function updateShipmentStatus(formData: FormData) {
+  await requireAdmin();
+
+  const shipmentId = String(formData.get("shipmentId") ?? "").trim();
+
+  const status = z
+    .enum([
+      "PENDING",
+      "LABEL_CREATED",
+      "PICKED_UP",
+      "IN_TRANSIT",
+      "OUT_FOR_DELIVERY",
+      "DELIVERED",
+      "CANCELLED",
+      "RETURNED",
+    ])
+    .parse(formData.get("status"));
+
+  if (!shipmentId) {
+    throw new Error("Shipment ID is required.");
+  }
+
+  const shipment = await prisma.shipment.findUnique({
+    where: { id: shipmentId },
+    include: { order: true },
+  });
+
+  if (!shipment) {
+    throw new Error("Shipment not found.");
+  }
+
+  if (shipment.status === status) {
+    revalidatePath("/admin/orders");
+    return;
+  }
+
+  if (["CANCELLED", "RETURNED", "DELIVERED"].includes(shipment.status)) {
+    throw new Error("This shipment is already in a final state.");
+  }
+
+  const allowedTransitions: Record<string, string[]> = {
+    PENDING: ["LABEL_CREATED", "CANCELLED"],
+    LABEL_CREATED: ["PICKED_UP", "CANCELLED"],
+    PICKED_UP: ["IN_TRANSIT", "CANCELLED"],
+    IN_TRANSIT: ["OUT_FOR_DELIVERY", "DELIVERED"],
+    OUT_FOR_DELIVERY: ["DELIVERED"],
+  };
+
+  if (!allowedTransitions[shipment.status]?.includes(status)) {
+    throw new Error(
+      `Cannot change shipment from ${shipment.status.replaceAll("_", " ")} to ${status.replaceAll("_", " ")}.`,
+    );
+  }
+
+  if (["CANCELLED", "REFUNDED", "RETURNED"].includes(shipment.order.status)) {
+    throw new Error("This order is closed and cannot be advanced.");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.shipment.update({
+      where: { id: shipmentId },
+      data: { status },
+    });
+
+    if (status === "DELIVERED") {
+      await tx.order.update({
+        where: { id: shipment.orderId },
+        data: { status: "DELIVERED" },
+      });
+    }
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/analytics");
+  revalidatePath(`/order/${shipment.order.orderNumber}`);
+  revalidatePath("/account");
 }
