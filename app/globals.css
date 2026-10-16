@@ -5531,3 +5531,117 @@ button {
     background: #f8f6f1 !important;
   }
 }
+
+/* OFFICE WEAR — CART CHECKOUT BUTTON FIX */
+
+.drawer-checkout,
+.cart-checkout-button,
+.cart-summary-checkout {
+  background: #24231f !important;
+  color: #f8f6f1 !important;
+  border: 1px solid #24231f !important;
+  opacity: 1;
+  text-decoration: none !important;
+  box-shadow: none;
+}
+
+.drawer-checkout:hover,
+.cart-checkout-button:hover,
+.cart-summary-checkout:hover {
+  background: #444138 !important;
+  color: #ffffff !important;
+}
+
+.drawer-checkout:disabled,
+.cart-checkout-button:disabled,
+.cart-summary-checkout:disabled {
+  background: #d8d5cd !important;
+  color: #77736a !important;
+  border-color: #d8d5cd !important;
+  cursor: not-allowed;
+}
+
+/* Avoid inherited transparency on cart summary sections */
+.drawer-summary,
+.cart-summary,
+.cart-order-summary {
+  background-color: #f8f6f1;
+  opacity: 1;
+}
+
+/* OFFICE WEAR — Cart page checkout button */
+
+.cart-summary {
+  background: #f0eee8 !important;
+  color: #292822;
+  opacity: 1;
+}
+
+.checkout-placeholder {
+  position: relative;
+  display: flex !important;
+  width: 100%;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  box-sizing: border-box;
+  padding: 16px 20px;
+  margin-top: 22px;
+  background: #24231f !important;
+  color: #f8f6f1 !important;
+  border: 1px solid #24231f !important;
+  border-radius: 0 !important;
+  opacity: 1 !important;
+  box-shadow: none !important;
+  text-decoration: none !important;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  line-height: 1.4;
+  text-transform: uppercase;
+  transition:
+    background 180ms ease,
+    border-color 180ms ease;
+}
+
+.checkout-placeholder:hover {
+  background: #444138 !important;
+  border-color: #444138 !important;
+  color: #ffffff !important;
+}
+
+.checkout-placeholder svg {
+  flex-shrink: 0;
+  color: inherit;
+  opacity: 1;
+}
+
+.checkout-note {
+  color: #817b70 !important;
+  font-size: 11px;
+  line-height: 1.6;
+  opacity: 1 !important;
+}
+
+.cart-summary .summary-total {
+  border-top: 1px solid #d9d5cc;
+}
+
+.cart-summary .summary-total strong {
+  color: #24231f;
+  font-weight: 600;
+}
+
+.cart-summary .free-shipping-note > div {
+  height: 3px;
+  overflow: hidden;
+  background: #d8d4cb;
+}
+
+.cart-summary .free-shipping-note > div i {
+  display: block;
+  height: 100%;
+  background: #777166;
+  transition: width 180ms ease;
+}
