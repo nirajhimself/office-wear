@@ -78,7 +78,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // Only an authenticated owner can use a saved address.
+    // Saved addresses can only be used by their authenticated owner.
     let savedAddress = null;
 
     if (data.savedAddressId) {
@@ -134,7 +134,7 @@ export async function POST(request: Request) {
       ? null
       : crypto.randomUUID().replaceAll("-", "");
 
-    // Create the order and reserve stock atomically.
+    // Create the order and reserve inventory atomically.
     const created = await prisma.$transaction(async (tx) => {
       await reserveInventory(tx, quote.lines, number);
 
@@ -183,6 +183,7 @@ export async function POST(request: Request) {
             create: {
               amount: quote.total,
               status: "PENDING",
+              ...(data.paymentMethod === "COD" ? { provider: "cod" } : {}),
             },
           },
         },
@@ -206,13 +207,13 @@ export async function POST(request: Request) {
       return order;
     }, transactionOptions);
 
-    // COD: confirm payment and reserved inventory atomically.
+    // COD orders are confirmed, but payment remains pending until collection.
     if (data.paymentMethod === "COD") {
       await prisma.$transaction(async (tx) => {
         await tx.payment.update({
           where: { orderId: created.id },
           data: {
-            status: "AUTHORIZED",
+            status: "PENDING",
             provider: "cod",
           },
         });
@@ -221,7 +222,7 @@ export async function POST(request: Request) {
           where: { id: created.id },
           data: {
             status: "PAYMENT_CONFIRMED",
-            paymentStatus: "AUTHORIZED",
+            paymentStatus: "PENDING",
           },
         });
 
@@ -236,7 +237,7 @@ export async function POST(request: Request) {
       });
     }
 
-    // Razorpay: create the provider order after the database transaction.
+    // Create the Razorpay order outside the database transaction.
     try {
       const rp = await createRazorpayOrder({
         amount: quote.total,
@@ -258,7 +259,7 @@ export async function POST(request: Request) {
         keyId: process.env.RAZORPAY_KEY_ID,
       });
     } catch (error) {
-      // Mark the pending order failed and release its reserved inventory.
+      // Mark the pending order failed and release its inventory reservation.
       await prisma.$transaction(async (tx) => {
         const order = await tx.order.findUnique({
           where: { id: created.id },
