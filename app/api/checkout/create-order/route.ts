@@ -3,8 +3,21 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth/session";
-import { quoteCart, reserveInventory, confirmInventory } from "@/lib/commerce";
+import {
+  quoteCart,
+  reserveInventory,
+  confirmInventory,
+  releaseInventory,
+} from "@/lib/commerce";
 import { createRazorpayOrder } from "@/lib/payments/razorpay";
+
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
+const transactionOptions = {
+  maxWait: 10000,
+  timeout: 20000,
+};
 
 const schema = z.object({
   items: z
@@ -38,6 +51,7 @@ const schema = z.object({
 
 function orderNumber() {
   const now = new Date();
+
   return `OW${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
 }
 
@@ -64,7 +78,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // A saved address can only be used by its authenticated owner.
+    // Only an authenticated owner can use a saved address.
     let savedAddress = null;
 
     if (data.savedAddressId) {
@@ -84,7 +98,9 @@ export async function POST(request: Request) {
 
       if (!savedAddress) {
         return NextResponse.json(
-          { error: "Saved address not found. Please select another address." },
+          {
+            error: "Saved address not found. Please select another address.",
+          },
           { status: 400 },
         );
       }
@@ -118,11 +134,10 @@ export async function POST(request: Request) {
       ? null
       : crypto.randomUUID().replaceAll("-", "");
 
+    // Create the order and reserve stock atomically.
     const created = await prisma.$transaction(async (tx) => {
       await reserveInventory(tx, quote.lines, number);
 
-      // Reuse the selected saved address. For a new address, create one
-      // for the signed-in customer. Guest addresses remain on the order.
       const address = savedAddress
         ? savedAddress
         : user
@@ -189,13 +204,17 @@ export async function POST(request: Request) {
       }
 
       return order;
-    });
+    }, transactionOptions);
 
+    // COD: confirm payment and reserved inventory atomically.
     if (data.paymentMethod === "COD") {
       await prisma.$transaction(async (tx) => {
         await tx.payment.update({
           where: { orderId: created.id },
-          data: { status: "AUTHORIZED", provider: "cod" },
+          data: {
+            status: "AUTHORIZED",
+            provider: "cod",
+          },
         });
 
         await tx.order.update({
@@ -207,7 +226,7 @@ export async function POST(request: Request) {
         });
 
         await confirmInventory(tx, created.id);
-      });
+      }, transactionOptions);
 
       return NextResponse.json({
         success: true,
@@ -217,6 +236,7 @@ export async function POST(request: Request) {
       });
     }
 
+    // Razorpay: create the provider order after the database transaction.
     try {
       const rp = await createRazorpayOrder({
         amount: quote.total,
@@ -238,47 +258,51 @@ export async function POST(request: Request) {
         keyId: process.env.RAZORPAY_KEY_ID,
       });
     } catch (error) {
+      // Mark the pending order failed and release its reserved inventory.
       await prisma.$transaction(async (tx) => {
         const order = await tx.order.findUnique({
           where: { id: created.id },
           select: { status: true },
         });
 
-        if (order?.status === "PENDING") {
-          await tx.payment.update({
-            where: { orderId: created.id },
-            data: { status: "FAILED" },
+        if (order?.status !== "PENDING") {
+          return;
+        }
+
+        await tx.payment.update({
+          where: { orderId: created.id },
+          data: { status: "FAILED" },
+        });
+
+        await tx.order.update({
+          where: { id: created.id },
+          data: {
+            status: "CANCELLED",
+            paymentStatus: "FAILED",
+          },
+        });
+
+        await releaseInventory(tx, created.id);
+
+        if (created.couponCode) {
+          const coupon = await tx.coupon.findUnique({
+            where: { code: created.couponCode },
           });
 
-          await tx.order.update({
-            where: { id: created.id },
-            data: {
-              status: "CANCELLED",
-              paymentStatus: "FAILED",
-            },
-          });
-
-          const { releaseInventory } = await import("@/lib/commerce");
-          await releaseInventory(tx, created.id);
-
-          if (created.couponCode) {
-            const coupon = await tx.coupon.findUnique({
-              where: { code: created.couponCode },
+          if (coupon) {
+            await tx.couponUsage.deleteMany({
+              where: { orderId: created.id },
             });
 
-            if (coupon) {
-              await tx.couponUsage.deleteMany({
-                where: { orderId: created.id },
-              });
-
-              await tx.coupon.update({
-                where: { id: coupon.id },
-                data: { usedCount: { decrement: 1 } },
-              });
-            }
+            await tx.coupon.update({
+              where: { id: coupon.id },
+              data: {
+                usedCount: { decrement: 1 },
+              },
+            });
           }
         }
-      });
+      }, transactionOptions);
 
       throw error;
     }
