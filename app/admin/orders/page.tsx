@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-
+import React from "react";
 import {
   updateOrderStatus,
   createShipmentForOrder,
   updateShipmentStatus,
+  refreshShipmentTracking,
+  markCodPaymentCollected,
 } from "@/lib/admin/actions";
 
 type SearchParams = Promise<{
@@ -263,6 +265,29 @@ export default async function AdminOrders({
                       {order.payment?.providerPaymentId && (
                         <small>Ref: {order.payment.providerPaymentId}</small>
                       )}
+
+                      {isCod &&
+                        !isPaid &&
+                        !isClosed &&
+                        order.status === "DELIVERED" &&
+                        order.paymentStatus === "PENDING" &&
+                        order.payment?.provider === "cod" &&
+                        order.payment.status === "PENDING" && (
+                          <form action={markCodPaymentCollected}>
+                            <input
+                              type="hidden"
+                              name="orderId"
+                              value={order.id}
+                            />
+                            <button type="submit" className="admin-ship-button">
+                              Mark COD collected
+                            </button>
+                            <small>
+                              Only after the cash has been received and
+                              verified.
+                            </small>
+                          </form>
+                        )}
                     </td>
 
                     <td>
@@ -318,6 +343,21 @@ export default async function AdminOrders({
                             Current:{" "}
                             {order.shipment.status.replaceAll("_", " ")}
                           </small>
+
+                          <form action={refreshShipmentTracking}>
+                            <input
+                              type="hidden"
+                              name="shipmentId"
+                              value={order.shipment.id}
+                            />
+                            <button type="submit" className="admin-ship-button">
+                              Sync from Shiprocket
+                            </button>
+                            <small>
+                              Last record update:{" "}
+                              {order.shipment.updatedAt.toLocaleString("en-IN")}
+                            </small>
+                          </form>
 
                           <form
                             action={updateShipmentStatus}

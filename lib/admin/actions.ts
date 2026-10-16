@@ -417,3 +417,260 @@ export async function updateShipmentStatus(formData: FormData) {
   revalidatePath(`/order/${shipment.order.orderNumber}`);
   revalidatePath("/account");
 }
+
+function mapShiprocketStatus(
+  raw: unknown,
+):
+  | "PENDING"
+  | "LABEL_CREATED"
+  | "PICKED_UP"
+  | "IN_TRANSIT"
+  | "OUT_FOR_DELIVERY"
+  | "DELIVERED"
+  | "CANCELLED"
+  | "RETURNED"
+  | null {
+  if (!raw || typeof raw !== "object") return null;
+
+  const root = raw as Record<string, any>;
+  const tracking =
+    root.tracking_data ?? root.data?.tracking_data ?? root.data ?? root;
+
+  const firstTrack = Array.isArray(tracking?.shipment_track)
+    ? tracking.shipment_track[0]
+    : null;
+
+  const candidates = [
+    tracking?.shipment_status,
+    tracking?.current_status,
+    firstTrack?.current_status,
+    tracking?.shipment_track_activities?.[0]?.activity,
+    tracking?.shipment_track_activities?.[0]?.["sr-status-label"],
+  ];
+
+  const text = candidates
+    .filter((value) => typeof value === "string")
+    .join(" ")
+    .toUpperCase()
+    .replaceAll("_", " ");
+
+  if (
+    /\bRTO DELIVERED\b|\bRETURNED TO SELLER\b|\bRETURN DELIVERED\b/.test(text)
+  ) {
+    return "RETURNED";
+  }
+
+  if (/\bDELIVERED\b/.test(text) && !/\bOUT FOR DELIVERY\b/.test(text)) {
+    return "DELIVERED";
+  }
+
+  if (/\bOUT FOR DELIVERY\b/.test(text)) {
+    return "OUT_FOR_DELIVERY";
+  }
+
+  if (/\bCANCELLED\b|\bCANCELED\b/.test(text)) {
+    return "CANCELLED";
+  }
+
+  if (/\bIN TRANSIT\b|\bSHIPPED\b|\bREACHED AT DESTINATION\b/.test(text)) {
+    return "IN_TRANSIT";
+  }
+
+  if (/\bPICKED UP\b|\bPICKUP COMPLETE\b|\bPICKUP DONE\b/.test(text)) {
+    return "PICKED_UP";
+  }
+
+  if (
+    /\bAWB ASSIGNED\b|\bLABEL GENERATED\b|\bLABEL CREATED\b|\bMANIFEST GENERATED\b|\bPICKUP SCHEDULED\b/.test(
+      text,
+    )
+  ) {
+    return "LABEL_CREATED";
+  }
+
+  return null;
+}
+
+export async function refreshShipmentTracking(formData: FormData) {
+  await requireAdmin();
+
+  const shipmentId = String(formData.get("shipmentId") ?? "").trim();
+
+  if (!shipmentId) {
+    throw new Error("Shipment ID is required.");
+  }
+
+  const shipment = await prisma.shipment.findUnique({
+    where: { id: shipmentId },
+    include: { order: true },
+  });
+
+  if (!shipment) {
+    throw new Error("Shipment not found.");
+  }
+
+  if (!shipment.awb) {
+    throw new Error("This shipment has no AWB. Assign a courier first.");
+  }
+
+  const { shippingProvider } = await import("@/lib/shipping");
+  const trackingResponse = await shippingProvider.trackShipment(shipment.awb);
+  const mappedStatus = mapShiprocketStatus(trackingResponse);
+
+  await prisma.$transaction(async (tx) => {
+    const updateData: {
+      rawResponse: any;
+      status?: typeof shipment.status;
+    } = {
+      rawResponse: trackingResponse as any,
+    };
+
+    if (mappedStatus) {
+      updateData.status = mappedStatus;
+    }
+
+    await tx.shipment.update({
+      where: { id: shipment.id },
+      data: updateData,
+    });
+
+    if (
+      mappedStatus === "DELIVERED" &&
+      !["CANCELLED", "REFUNDED", "RETURNED"].includes(shipment.order.status)
+    ) {
+      await tx.order.update({
+        where: { id: shipment.orderId },
+        data: { status: "DELIVERED" },
+      });
+    }
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/analytics");
+  revalidatePath(`/order/${shipment.order.orderNumber}`);
+  revalidatePath("/account");
+}
+
+export async function markCodPaymentCollected(formData: FormData) {
+  const admin = await requireAdmin();
+
+  const orderId = String(formData.get("orderId") ?? "").trim();
+
+  if (!orderId) {
+    throw new Error("Order ID is required.");
+  }
+
+  const collectedAt = new Date();
+
+  const orderNumber = await prisma.$transaction(
+    async (tx) => {
+      const order = await tx.order.findUnique({
+        where: { id: orderId },
+        include: { payment: true },
+      });
+
+      if (!order) {
+        throw new Error("Order not found.");
+      }
+
+      if (order.paymentMethod !== "COD") {
+        throw new Error("This action is only for COD orders.");
+      }
+
+      if (order.status !== "DELIVERED") {
+        throw new Error(
+          "Only delivered COD orders can be marked as collected.",
+        );
+      }
+
+      if (order.paymentStatus !== "PENDING") {
+        throw new Error(
+          "This payment is no longer pending. Refresh the page and check its status.",
+        );
+      }
+
+      if (
+        !order.payment ||
+        order.payment.provider !== "cod" ||
+        order.payment.status !== "PENDING"
+      ) {
+        throw new Error(
+          "The pending COD payment record was not found. Please verify this order.",
+        );
+      }
+
+      const previousResponse = order.payment.rawResponse;
+      const previousAudit =
+        previousResponse &&
+        typeof previousResponse === "object" &&
+        !Array.isArray(previousResponse)
+          ? previousResponse
+          : {};
+
+      const auditRecord = {
+        ...previousAudit,
+        collection: {
+          source: "ADMIN_COD_COLLECTION",
+          collectedAt: collectedAt.toISOString(),
+          collectedBy: {
+            id: admin.id,
+            email: admin.email,
+          },
+          amount: order.total,
+          currency: "INR",
+        },
+      };
+
+      // Conditional updates prevent duplicate collection.
+      const paymentUpdate = await tx.payment.updateMany({
+        where: {
+          orderId: order.id,
+          provider: "cod",
+          status: "PENDING",
+        },
+        data: {
+          status: "PAID",
+          rawResponse: auditRecord,
+        },
+      });
+
+      if (paymentUpdate.count !== 1) {
+        throw new Error(
+          "The COD payment was already updated. Refresh and check the status.",
+        );
+      }
+
+      const orderUpdate = await tx.order.updateMany({
+        where: {
+          id: order.id,
+          paymentMethod: "COD",
+          paymentStatus: "PENDING",
+          status: "DELIVERED",
+        },
+        data: {
+          paymentStatus: "PAID",
+        },
+      });
+
+      if (orderUpdate.count !== 1) {
+        throw new Error(
+          "The order payment status changed. Refresh and try again.",
+        );
+      }
+
+      return order.orderNumber;
+    },
+    {
+      isolationLevel: "Serializable",
+      maxWait: 10000,
+      timeout: 20000,
+    },
+  );
+
+  revalidatePath("/admin");
+  revalidatePath("/admin/orders");
+  revalidatePath("/admin/analytics");
+  revalidatePath("/account");
+  revalidatePath(`/order/${orderNumber}`);
+}
