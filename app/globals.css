@@ -5403,3 +5403,131 @@ button {
     padding: 24px;
   }
 }
+
+/* ==========================================
+   OFFICE WEAR — EDITORIAL CART COLOR SYSTEM
+   Warm ivory • Charcoal • Soft stone
+   ========================================== */
+
+.cart-drawer-backdrop {
+  background: rgba(34, 32, 27, 0.42) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.cart-drawer {
+  color: #292822 !important;
+  background: #f8f6f1 !important;
+  background-color: #f8f6f1 !important;
+  border-left: 1px solid #e5e0d6 !important;
+  box-shadow: -12px 0 36px rgba(37, 34, 27, 0.12) !important;
+}
+
+.cart-drawer-head,
+.cart-drawer-items,
+.drawer-item,
+.drawer-summary,
+.cart-drawer-empty {
+  color: #292822 !important;
+  background: #f8f6f1 !important;
+}
+
+.cart-drawer-head {
+  border-bottom: 1px solid #e4dfd5 !important;
+}
+
+.cart-drawer-head .eyebrow-dark,
+.cart-empty-number {
+  color: #817b70 !important;
+  letter-spacing: 0.17em;
+}
+
+.cart-drawer-head h2,
+.cart-drawer-empty h3 {
+  color: #292822 !important;
+}
+
+.cart-drawer-close {
+  color: #292822 !important;
+  background: #efede6 !important;
+  border-color: #e2ddd2 !important;
+}
+
+.drawer-item {
+  border-bottom-color: #e4dfd5 !important;
+}
+
+.drawer-image {
+  background: #eeebe3 !important;
+}
+
+.drawer-product-name,
+.drawer-item-price,
+.drawer-summary-row strong,
+.drawer-total,
+.drawer-total strong {
+  color: #292822 !important;
+}
+
+.drawer-product-details p,
+.remove-link,
+.drawer-continue-shopping {
+  color: #817b70 !important;
+}
+
+.mini-quantity {
+  color: #292822 !important;
+  background: #fdfcf9 !important;
+  border-color: #dcd6ca !important;
+}
+
+.drawer-summary {
+  border-top-color: #ded8cc !important;
+  box-shadow: 0 -8px 22px rgba(45, 40, 31, 0.035) !important;
+}
+
+.drawer-delivery-note {
+  color: #625e53 !important;
+  background: #efede5 !important;
+  border-color: #e4dfd4 !important;
+}
+
+.drawer-summary-row {
+  color: #777166 !important;
+}
+
+.drawer-total {
+  border-top-color: #ded8cc !important;
+}
+
+.drawer-tax-note {
+  color: #8a8478 !important;
+}
+
+.drawer-checkout {
+  color: #f8f6f1 !important;
+  background: #24231f !important;
+  border-color: #24231f !important;
+}
+
+.drawer-checkout:hover {
+  color: #fff !important;
+  background: #444138 !important;
+  border-color: #444138 !important;
+}
+
+.drawer-continue-shopping {
+  background: transparent !important;
+}
+
+.cart-drawer-empty p {
+  color: #777166 !important;
+}
+
+@media (max-width: 640px) {
+  .cart-drawer-head,
+  .cart-drawer-items,
+  .drawer-summary {
+    background: #f8f6f1 !important;
+  }
+}
