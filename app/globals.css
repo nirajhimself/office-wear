@@ -5645,3 +5645,23 @@ button {
   background: #777166;
   transition: width 180ms ease;
 }
+
+.address-section-description {
+  margin: 12px 0 18px;
+  color: #777166;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.account-address-add {
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid #e3ded4;
+}
+
+.account-address-add h3 {
+  margin: 0 0 16px;
+  color: #292822;
+  font-size: 16px;
+  font-weight: 500;
+}
