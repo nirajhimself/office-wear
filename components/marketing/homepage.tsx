@@ -6,34 +6,35 @@ import { ArrowRight, Plus } from "lucide-react";
 import { motion } from "framer-motion";
 
 import type { StoreProduct } from "@/lib/storefront";
+import { CampaignBanner } from "@/components/marketing/campaign-banner";
 
 const categories = [
   {
     name: "Shirts",
     eyebrow: "01 / Shirts",
     image:
-      "https://images.unsplash.com/photo-1598032895397-b9472444bf93?auto=format&fit=crop&w=1500&q=88",
+      "https://images.unsplash.com/photo-1603252110481-7ba873bf42ab?auto=format&fit=crop&w=1500&q=88",
     href: "/shop?category=shirts",
   },
   {
     name: "Trousers",
     eyebrow: "02 / Trousers",
     image:
-      "https://images.unsplash.com/photo-1555069519-127aadedf1ee?auto=format&fit=crop&w=1500&q=88",
+      "https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?auto=format&fit=crop&w=1500&q=88",
     href: "/shop?category=trousers",
   },
   {
-    name: "Jackets",
-    eyebrow: "03 / Jackets",
+    name: "Blazers",
+    eyebrow: "06 / Blazers",
     image:
-      "https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=1500&q=88",
-    href: "/shop?category=jackets",
+      "https://images.unsplash.com/photo-1581044777550-4cfa60707c03?auto=format&fit=crop&w=1500&q=88",
+    href: "/shop?category=blazers",
   },
   {
     name: "Essentials",
-    eyebrow: "04 / Essentials",
+    eyebrow: "08 / Essentials",
     image:
-      "https://images.unsplash.com/photo-1529139574466-a303027c1d8b?auto=format&fit=crop&w=1500&q=88",
+      "https://images.unsplash.com/photo-1483985988355-763728e1935b?auto=format&fit=crop&w=1500&q=88",
     href: "/shop?category=essentials",
   },
 ];
@@ -122,24 +123,8 @@ export function Homepage({
         </div>
       </section>
 
-      {/* Winter collection campaign */}
-      <section
-        className="winter-campaign"
-        aria-label="OFFICE WEAR winter collection"
-      >
-        <Link
-          href="/shop?category=jackets"
-          className="winter-campaign-link"
-          aria-label="Shop the OFFICE WEAR winter collection"
-        >
-          <img
-            src="/images/office-wear-winter-banner.png"
-            alt="OFFICE WEAR winter collection featuring jackets, sweaters and sweatshirts"
-            className="winter-campaign-image"
-            fetchPriority="high"
-          />
-        </Link>
-      </section>
+      {/* Sectioned edit campaign */}
+      <CampaignBanner />
 
       {/* Brand introduction */}
       <section

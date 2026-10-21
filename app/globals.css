@@ -4599,98 +4599,41 @@ button {
   }
 }
 
-/* OFFICE WEAR — Winter campaign banner */
-.winter-campaign {
-  width: 100%;
-  overflow: hidden;
-  background: #f3eee6;
-}
-
-.winter-campaign-link {
+/* OFFICE WEAR — sectioned-edit campaign banner.
+   The banner is an inline <svg> (see components/marketing/campaign-banner.tsx),
+   so it scales to the container on its own: no object-fit or image sizing. */
+.campaign-banner {
   display: block;
   width: 100%;
-  line-height: 0;
-}
-
-.winter-campaign-image {
-  display: block;
-  width: 100%;
-  height: auto;
-  object-fit: contain;
-}
-
-@media (max-width: 640px) {
-  .winter-campaign-image {
-    width: 100%;
-    height: auto;
-  }
-}
-
-/* Winter campaign banner alignment */
-.winter-campaign {
-  display: block;
-  width: 100%;
-  max-width: 100%;
   margin: 0;
   padding: 0;
   overflow: hidden;
-  background: #f3f1eb;
+  background: #090909;
 }
 
-.winter-campaign-link {
+.campaign-banner-link {
   display: block;
   width: 100%;
-  margin: 0;
-  padding: 0;
   line-height: 0;
+  text-decoration: none;
 }
 
-.winter-campaign-image {
+.campaign-banner-svg {
   display: block;
   width: 100%;
-  max-width: 100%;
   height: auto;
-  margin: 0;
-  padding: 0;
-  object-fit: contain;
-  object-position: center;
 }
 
-/* Keep the complete banner visible on mobile */
-@media (max-width: 768px) {
-  .winter-campaign {
-    height: auto;
+/* The artwork is 8:3. Past roughly 1600px that gets tall enough to push the
+   rest of the homepage off-screen, so cap it and centre the overflow. */
+@media (min-width: 1600px) {
+  .campaign-banner {
+    max-height: 600px;
   }
 
-  .winter-campaign-image {
-    width: 100%;
-    height: auto;
-    object-fit: contain;
-    object-position: center;
-  }
-}
-
-/* Fix winter banner side cropping on mobile */
-@media screen and (max-width: 600px) {
-  .winter-campaign {
-    width: 100% !important;
-    height: auto !important;
-    overflow: hidden !important;
-  }
-
-  .winter-campaign-link {
-    width: 100% !important;
-    height: auto !important;
-    overflow: visible !important;
-  }
-
-  .winter-campaign-image {
-    display: block !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    height: auto !important;
-    object-fit: contain !important;
-    object-position: center !important;
+  .campaign-banner-svg {
+    max-height: 600px;
+    margin: 0 auto;
   }
 }
 

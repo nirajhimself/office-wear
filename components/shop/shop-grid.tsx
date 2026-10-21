@@ -15,16 +15,19 @@ export function ShopGrid({ products, initialCategory, initialGender, initialNewe
 
   const visible = useMemo(() => {
     const filtered = products.filter((p) => (category === "All" || p.category === category) && (gender === "All" || p.gender === gender || p.gender === "Unisex"));
+    const newest = (p: StoreProduct) => (p.createdAt ? Date.parse(p.createdAt) : 0);
     return [...filtered].sort((a, b) => {
       if (sort === "price-low") return a.price - b.price;
       if (sort === "price-high") return b.price - a.price;
-      if (sort === "newest") return b.id.localeCompare(a.id);
-      return a.id.localeCompare(b.id);
+      if (sort === "newest") return newest(b) - newest(a);
+      // Featured: flagged pieces first, then most recent within each group.
+      if (Boolean(a.featured) !== Boolean(b.featured)) return a.featured ? -1 : 1;
+      return newest(b) - newest(a);
     });
-  }, [category, gender, sort]);
+  }, [products, category, gender, sort]);
 
   const filters = <div className="shop-filter-panel">
-    <div className="shop-filter-group"><span>Category</span><div>{["All", "Shirts", "Trousers", "Jackets", "Essentials"].map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div></div>
+    <div className="shop-filter-group"><span>Category</span><div>{["All", "Shirts", "Trousers", "T-Shirts", "Polos", "Overshirts", "Blazers", "Co-ord Sets", "Essentials"].map((item) => <button key={item} className={category === item ? "active" : ""} onClick={() => setCategory(item)}>{item}</button>)}</div></div>
     <div className="shop-filter-group"><span>For</span><div>{["All", "Men", "Women"].map((item) => <button key={item} className={gender === item ? "active" : ""} onClick={() => setGender(item)}>{item}</button>)}</div></div>
   </div>;
 
