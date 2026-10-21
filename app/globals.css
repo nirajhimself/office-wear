@@ -3887,9 +3887,34 @@ button {
   grid-column: 1/-1;
   resize: vertical;
 }
-.admin-product-form input:nth-child(1),
-.admin-product-form textarea {
+.admin-form .span-2 {
   grid-column: span 2;
+}
+.admin-form .span-4 {
+  grid-column: 1/-1;
+}
+.admin-form label small {
+  font-size: 9px;
+  color: #777;
+  text-transform: none;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+.admin-form label small code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 9px;
+  background: #e3e0d8;
+  padding: 1px 4px;
+}
+.admin-check {
+  align-content: start;
+}
+.admin-check input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  accent-color: #111;
+  justify-self: start;
 }
 .admin-form .button {
   border: 0;

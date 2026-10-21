@@ -163,61 +163,178 @@ export async function createCoupon(formData: FormData) {
   });
   revalidatePath("/admin/coupons");
 }
+/*
+  Variant IDs MUST be `${productId}-${size}-${color}` with the size and colour
+  spelled exactly as they are stored. quoteCart() in lib/commerce.ts rebuilds
+  this string from the cart payload to find the variant — nothing in the schema
+  enforces the shape, so a different format here silently breaks checkout with
+  "One or more items are no longer available."
+*/
+function variantKey(productId: string, size: string, color: string) {
+  return `${productId}-${size}-${color}`;
+}
+
+function splitList(value: FormDataEntryValue | null) {
+  return [
+    ...new Set(
+      String(value ?? "")
+        .split(/[,\n]/)
+        .map((entry) => entry.trim())
+        .filter(Boolean),
+    ),
+  ];
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+// Mirrors prisma/seed.js: OW-<id>-<SIZE>-<COLOUR>
+function skuFor(base: string, size: string, color: string) {
+  const part = (value: string) =>
+    value.toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `${part(base)}-${part(size)}-${part(color)}`;
+}
+
+/*
+  Local files under public/ (e.g. /products/oxford-shirt-01.jpg) need no
+  next.config allowlist. A remote URL does — see images.remotePatterns there.
+*/
+function assertImageAllowed(url: string) {
+  if (url.startsWith("/")) return;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(
+      `"${url}" is not a valid image. Use /products/your-file.jpg for an uploaded photo, or a full https:// URL.`,
+    );
+  }
+  if (parsed.protocol !== "https:") {
+    throw new Error("Remote images must be served over https.");
+  }
+  const allowed = (process.env.IMAGE_HOSTS ?? "images.unsplash.com")
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean);
+  if (!allowed.includes(parsed.host)) {
+    throw new Error(
+      `Images from ${parsed.host} are blocked. Add it to IMAGE_HOSTS in .env and to images.remotePatterns in next.config.ts, or upload the file to public/products/ and use /products/your-file.jpg.`,
+    );
+  }
+}
+
 export async function createProduct(formData: FormData) {
   await requireAdmin();
-  const data = {
-    name: String(formData.get("name")).trim(),
-    slug: String(formData.get("slug")).trim().toLowerCase(),
-    description: String(formData.get("description")).trim(),
-    gender: String(formData.get("gender")),
-    category: String(formData.get("category")),
-    price: Number(formData.get("price")),
-    color: String(formData.get("color")).trim(),
-    size: String(formData.get("size")).trim(),
-    image: String(formData.get("image")).trim(),
-    sku: String(formData.get("sku")).trim(),
-  };
-  if (
-    !data.name ||
-    !data.slug ||
-    !data.image ||
-    !data.sku ||
-    !Number.isInteger(data.price)
-  )
-    throw new Error("Complete all product fields.");
+
+  const name = String(formData.get("name") ?? "").trim();
+  const slug = slugify(String(formData.get("slug") ?? "") || name);
+  const description = String(formData.get("description") ?? "").trim();
+  const gender = String(formData.get("gender") ?? "Unisex");
+  const categorySlug = slugify(String(formData.get("category") ?? ""));
+  const price = Number(formData.get("price"));
+  const compareAtRaw = String(formData.get("compareAt") ?? "").trim();
+  const compareAt = compareAtRaw ? Number(compareAtRaw) : null;
+  const stock = Number(formData.get("stock") ?? 0);
+  const sizes = splitList(formData.get("sizes"));
+  const colors = splitList(formData.get("colors"));
+  const images = splitList(formData.get("images"));
+  const skuBase = String(formData.get("skuBase") ?? "").trim();
+  const featured = formData.get("featured") === "on";
+  const status = z
+    .enum(["DRAFT", "ACTIVE"])
+    .parse(formData.get("status") ?? "DRAFT");
+
+  if (!name) throw new Error("Product name is required.");
+  if (!slug) throw new Error("Could not build a URL slug from that name.");
+  if (!description) throw new Error("A description is required.");
+  if (!skuBase) throw new Error("An SKU prefix is required (e.g. OW-201).");
+  if (!Number.isInteger(price) || price <= 0)
+    throw new Error("Price must be a whole number of rupees, e.g. 2490.");
+  if (compareAt !== null && (!Number.isInteger(compareAt) || compareAt <= price))
+    throw new Error(
+      "The compare-at price must be a whole number higher than the selling price.",
+    );
+  if (!Number.isInteger(stock) || stock < 0)
+    throw new Error("Opening stock must be zero or a positive whole number.");
+  if (!sizes.length) throw new Error("Add at least one size, e.g. S, M, L, XL.");
+  if (!colors.length) throw new Error("Add at least one colour.");
+  if (!images.length)
+    throw new Error("Add at least one image. Two makes the hover effect work.");
+  images.forEach(assertImageAllowed);
+
   const category = await prisma.category.findUnique({
-    where: { slug: data.category.toLowerCase() },
+    where: { slug: categorySlug },
   });
-  if (!category) throw new Error("Category not found.");
+  if (!category)
+    throw new Error(
+      `No category matches "${categorySlug}". Pick one from the list.`,
+    );
+
+  const clash = await prisma.product.findUnique({ where: { slug } });
+  if (clash)
+    throw new Error(
+      `The slug "${slug}" is already used by ${clash.name}. Choose another.`,
+    );
+
   const collection = await prisma.collection.findUnique({
-    where: { slug: "the-first-edit" },
+    where: { slug: "the-sectioned-edit" },
   });
+
   const productId = `ow-${crypto.randomUUID().slice(0, 8)}`;
+
+  const variants = sizes.flatMap((size) =>
+    colors.map((color) => ({
+      id: variantKey(productId, size, color),
+      sku: skuFor(skuBase, size, color),
+      size,
+      color,
+      price,
+      ...(compareAt !== null ? { compareAt } : {}),
+      inventory: { create: { stock } },
+    })),
+  );
+
+  const takenSkus = await prisma.productVariant.findMany({
+    where: { sku: { in: variants.map((variant) => variant.sku) } },
+    select: { sku: true },
+  });
+  if (takenSkus.length)
+    throw new Error(
+      `These SKUs already exist: ${takenSkus.map((v) => v.sku).join(", ")}. Use a different SKU prefix.`,
+    );
+
   await prisma.product.create({
     data: {
       id: productId,
-      name: data.name,
-      slug: data.slug,
-      description: data.description,
-      gender: data.gender,
+      name,
+      slug,
+      description,
+      gender,
       categoryId: category.id,
       collectionId: collection?.id,
-      status: "ACTIVE",
-      variants: {
-        create: {
-          id: `${productId}-${data.size}-${data.color}`,
-          sku: data.sku,
-          size: data.size,
-          color: data.color,
-          price: data.price,
-          inventory: { create: { stock: 0 } },
-        },
+      status,
+      featured,
+      variants: { create: variants },
+      images: {
+        create: images.map((url, index) => ({
+          url,
+          alt: name,
+          sortOrder: index,
+        })),
       },
-      images: { create: { url: data.image, alt: data.name, sortOrder: 0 } },
     },
   });
+
   revalidatePath("/admin/products");
+  revalidatePath("/admin/inventory");
   revalidatePath("/shop");
+  revalidatePath("/");
+  revalidatePath(`/product/${slug}`);
 }
 
 export async function processReturn(formData: FormData) {
